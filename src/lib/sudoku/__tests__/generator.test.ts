@@ -1,5 +1,9 @@
 import { CLUE_RANGES, DIFFICULTIES } from "@/lib/sudoku/difficulty";
-import { generatePuzzle, generateSolvedGrid } from "@/lib/sudoku/generator";
+import {
+  generatePuzzle,
+  generateSolvedGrid,
+  puzzleClueCount,
+} from "@/lib/sudoku/generator";
 import { mulberry32 } from "@/lib/sudoku/rng";
 import { buildMasks, countSolutions } from "@/lib/sudoku/solver";
 import { CELL_COUNT, countClues, type Difficulty, type Puzzle } from "@/lib/sudoku/types";
@@ -165,5 +169,53 @@ describe("performance", () => {
       const elapsed = performance.now() - started;
       expect(elapsed).toBeLessThan(1000);
     }
+  });
+});
+
+describe("puzzleClueCount", () => {
+  it("matches both the grid's actual clue count and the puzzle's recorded one", () => {
+    for (const difficulty of DIFFICULTIES) {
+      const puzzle = SAMPLES[difficulty][0];
+      expect(puzzleClueCount(puzzle)).toBe(countClues(puzzle.grid));
+      expect(puzzleClueCount(puzzle)).toBe(puzzle.clueCount);
+    }
+  });
+});
+
+// Defensive path: `generatePuzzle` bounds its retries at MAX_ATTEMPTS rather
+// than looping forever if a target clue count is unreachable. This has never
+// been observed at the real clue ranges (see the architecture notes above),
+// so the only way to exercise the throw is to force every removal to be
+// rejected - which is exactly what a `countSolutions` that always reports
+// "more than one solution" does, regardless of what's actually being dug.
+//
+// The module's compiled exports aren't configurable, so `jest.spyOn` on a
+// plain namespace import throws ("Cannot redefine property"). Loading an
+// isolated copy of `generator` bound to a `jest.mock`-ed `solver` sidesteps
+// that without touching the real `solver` module used by every other test in
+// this file (and in the whole suite - `countSolutions` genuinely working is
+// the one thing this entire ticket cannot compromise on).
+describe("generatePuzzle exhaustion", () => {
+  it("throws a descriptive error after MAX_ATTEMPTS when no removal is ever accepted", () => {
+    let generatePuzzleWithStubbedSolver!: typeof generatePuzzle;
+
+    jest.isolateModules(() => {
+      jest.doMock("@/lib/sudoku/solver", () => ({
+        ...jest.requireActual("@/lib/sudoku/solver"),
+        countSolutions: () => 2,
+      }));
+      generatePuzzleWithStubbedSolver =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require("@/lib/sudoku/generator").generatePuzzle;
+    });
+
+    expect(() => generatePuzzleWithStubbedSolver("hard")).toThrow(
+      /Unable to generate a hard puzzle with \d+ clues after 20 attempts/,
+    );
+  });
+
+  it("the real solver (used by every other test) is unaffected by the isolated stub above", () => {
+    const puzzle = generatePuzzle("hard");
+    expect(countSolutions(puzzle.grid, 2)).toBe(1);
   });
 });

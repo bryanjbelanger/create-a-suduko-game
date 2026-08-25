@@ -1,3 +1,4 @@
+import { generatePuzzle } from "@/lib/sudoku/generator";
 import {
   buildMasks,
   countSolutions,
@@ -174,5 +175,21 @@ describe("solve", () => {
     const grid = CLASSIC.slice();
     grid[2] = 5;
     expect(solve(grid)).toBeNull();
+  });
+
+  it("solves a sparse, generated hard puzzle that requires real backtracking", () => {
+    // CLASSIC above is dense enough to be resolved by singles alone under the
+    // MRV heuristic, so it never needs to undo a placement and retry another
+    // digit. A 26-30 clue hard puzzle is sparse enough that guessing wrong is
+    // routine, so this exercises the search's backtrack branch for real
+    // rather than only its straight-line success path.
+    const puzzle = generatePuzzle("hard");
+    const solved = solve(puzzle.grid);
+    expect(solved).not.toBeNull();
+    expect(isComplete(solved as Grid)).toBe(true);
+    expect(findConflicts(solved as Grid).size).toBe(0);
+    puzzle.grid.forEach((value, index) => {
+      if (value !== 0) expect((solved as Grid)[index]).toBe(value);
+    });
   });
 });
